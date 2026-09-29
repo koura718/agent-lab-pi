@@ -1,0 +1,9 @@
+{
+  "name": "agent-lab-pi-workspace",
+  "private": true,
+  "packageManager": "pnpm@12.3.4",
+  "scripts": {
+    "pi": "node scripts/run-pi.mjs",
+    "test:pi": "node --test apps/pi-assistant/test/*.test.mjs"
+  }
+}

@@ -1,6 +1,7 @@
 # AI Agent Lab
 
 OpenAI Agents SDKとMCPを使い、Toolの実装・接続・テスト・運用を学び、拡張するためのPythonプロジェクトです。
+この派生版にはPiとCerebrasのQwen3.8 27Bを使う実行環境も追加しています。
 OpenAI・Anthropic（Claude評価用互換API）・Cerebrasのモデルを切り替え、同じプロセス内で並列に比較できます。
 文字列配列を比較する`compare_lists`を、Function Toolと別プロセスのMCP Serverから利用できます。
 Ubuntu 24.04を基準に、API不要の検証、実LLMの明示的な検証、CI、ログ、Tracing、環境構築を実装しています。
@@ -13,8 +14,8 @@ CodexとClaude Codeは開発支援ツールで、アプリケーションの実�
 Gitとmiseが利用可能なUbuntu 24.04で実行します。
 
 ```bash
-git clone https://github.com/koura718/agent-lab.git
-cd agent-lab
+git clone git@github.com:koura718/agent-lab-pi.git
+cd agent-lab-pi
 ```
 
 [mise.toml](mise.toml)の内容を確認し、信頼を許可してセットアップします。
@@ -49,6 +50,22 @@ mise exec -- uv run --frozen agent-lab --tool-mode function --no-tracing \
 ```bash
 ./scripts/validate.sh
 ```
+
+### Pi + Cerebras を追加する
+
+上記のPython環境のセットアップが完了した後、Piをリポジトリ内に固定バージョンで導入します。
+
+```bash
+./scripts/setup-pi.sh
+```
+
+`.env`の`CEREBRAS_API_KEY=`にCerebras Cloudのキーを設定して起動します。
+
+```bash
+mise exec -- pnpm pi
+```
+
+起動、MCP接続、確認方法と記事との対応は[Pi + Cerebras手順](docs/pi-cerebras.md)を参照してください。
 
 詳しい導入・再実行・障害対応は[bootstrap手順](docs/bootstrap.md)を参照してください。
 
