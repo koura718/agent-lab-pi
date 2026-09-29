@@ -1,0 +1,89 @@
+name: Validate
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install mise and project tools
+        uses: jdx/mise-action@v4
+        with:
+          cache: true
+          install: true
+
+      - name: Show tool versions
+        run: |
+          set -Eeuo pipefail
+
+          echo "mise:"
+          mise --version
+
+          echo
+          echo "Project tools:"
+          mise current
+
+          echo
+          echo "uv:"
+          uv --version
+
+          echo
+          echo "Python:"
+          python --version
+
+          echo
+          echo "Node.js:"
+          node --version
+
+          echo
+          echo "pnpm:"
+          pnpm --version
+
+      - name: Run bootstrap and validation
+        id: validation
+        run: ./scripts/bootstrap.sh --setup
+
+      - name: Save test results
+        if: ${{ always() && hashFiles('reports/pytest.xml') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pytest-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/pytest.xml
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Summarize validation
+        if: always()
+        env:
+          VALIDATION_OUTCOME: ${{ steps.validation.outcome }}
+        run: |
+          {
+            echo "## Validation"
+            echo "Result: ${VALIDATION_OUTCOME}"
+            if [ -f reports/pytest.xml ]; then
+              echo "JUnit XML: download pytest-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} from Artifacts (14 days)."
+            else
+              echo "No JUnit XML was generated. Inspect the first failed step in the job log."
+            fi
+            echo "Live tests are disabled in normal CI."
+          } >> "$GITHUB_STEP_SUMMARY"

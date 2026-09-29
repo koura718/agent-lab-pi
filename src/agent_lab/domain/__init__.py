@@ -1,0 +1,1 @@
+"""SDK-independent domain functions."""

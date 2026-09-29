@@ -1,0 +1,15 @@
+[agent]
+provider = "openai"
+tool_mode = "function"
+max_turns = 5
+run_timeout_seconds = 60
+
+[mcp]
+connect_timeout_seconds = 10
+call_timeout_seconds = 10
+
+[logging]
+level = "INFO"
+
+[tracing]
+enabled = false

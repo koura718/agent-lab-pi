@@ -1,0 +1,39 @@
+[project]
+name = "agent-lab"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Masaaki Koura on ubuntu-masa", email = "koura718@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "anyio>=4.15.1,<5",
+    "mcp>=2.2.0,<3",
+    "openai-agents>=0.22.2",
+]
+
+[project.scripts]
+agent-lab-compare-models = "agent_lab.model_comparison:cli"
+agent-lab = "agent_lab.main:cli"
+agent-lab-mcp = "agent_lab.mcp.server:cli"
+agent-lab-mcp-client = "agent_lab.mcp.client:cli"
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers"
+markers = [
+    "integration: real local MCP subprocess tests (no external API)",
+    "live: explicit real-model tests (API charges apply)",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.12,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.7",
+]
