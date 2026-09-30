@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { compareViaMcp } from "./mcp-bridge.mjs";
 
-// Pi 0.87.1 exposes registerTool. Delegate to the existing MCP diagnostic client.
+// Delegate to the existing MCP diagnostic client through Pi's registerTool API.
 export default function registerAgentLab(pi) {
   pi.registerTool({
     name: "compare_lists",

@@ -9,7 +9,7 @@ Cerebrasの[記事](https://www.cerebras.ai/blog/the-rise-of-slow-personal-assis
 | 要素 | 役割 |
 |---|---|
 | `mise.toml`、`uv.lock` | Ubuntu向けNode/Python環境とPython依存の固定 |
-| `pnpm-lock.yaml`、`apps/pi-assistant/` | Pi 0.87.1とNode依存の固定 |
+| `pnpm-lock.yaml`、`apps/pi-assistant/` | Pi 0.99.1とNode依存の固定 |
 | `scripts/run-pi.mjs` | Cerebras/Qwenを選択し、`.env`からキーを読む起動入口 |
 | `apps/pi-assistant/extension.mjs` | `compare_lists`をPiのToolとして登録 |
 | `apps/pi-assistant/mcp-bridge.mjs` | モデルキーを渡さずPythonのMCP診断CLIを実行 |
@@ -40,6 +40,21 @@ mise exec -- pnpm pi
 ```
 
 環境変数`CEREBRAS_API_KEY`があれば`.env`より優先します。起動コマンドは`cerebras/qwen-3.8-27b`と`--thinking off`を明示します。PiのUIで`/model`、`/thinking`を確認できます。実際のモデル利用可能状況と料金はCerebrasのアカウントで確認してください。
+
+## Piの更新
+
+Piはローカル依存として固定しています。更新時は`apps/pi-assistant/package.json`と`pnpm-lock.yaml`をセットで変更し、検証済みのコミットを取得してください。今回の更新は0.87.1から0.99.1です。既存の`compare_lists`拡張とMCP診断CLIへの接続を維持します。
+
+Piを終了してシェルに戻り、更新を取得して依存を同期します。
+
+```bash
+git pull --ff-only
+./scripts/setup-pi.sh
+mise exec -- pnpm --dir apps/pi-assistant exec pi --version
+mise exec -- pnpm pi
+```
+
+バージョン確認では`0.99.1`が表示されます。起動後は同じ`compare_lists`のプロンプトで実APIとTool接続を確認してください。`.env`と`.local/pi/`の既存内容は保持されます。
 
 ## APIを使わない確認
 
