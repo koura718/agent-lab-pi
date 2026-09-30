@@ -12,6 +12,7 @@ __pycache__/
 
 # Node.js
 node_modules/
+/.local/
 
 # Logs
 logs/

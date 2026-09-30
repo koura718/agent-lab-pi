@@ -1,0 +1,9 @@
+{
+  "name": "@agent-lab/pi-assistant",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.99.1",
+    "typebox": "1.3.27"
+  }
+}
