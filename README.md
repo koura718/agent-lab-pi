@@ -1,415 +1,311 @@
-# AI Agent Lab
+# Agent Lab Pi
 
-OpenAI Agents SDKとMCPを使い、Toolの実装・接続・テスト・運用を学び、拡張するためのPythonプロジェクトです。
-この派生版にはPiとCerebrasのQwen3.8 27Bを使う実行環境も追加しています。
-OpenAI・Anthropic（Claude評価用互換API）・Cerebrasのモデルを切り替え、同じプロセス内で並列に比較できます。
-文字列配列を比較する`compare_lists`を、Function Toolと別プロセスのMCP Serverから利用できます。
-Ubuntu 24.04を基準に、API不要の検証、実LLMの明示的な検証、CI、ログ、Tracing、環境構築を実装しています。
+**Pi + Cerebrasを対話型Agentの実行環境にし、Python製のTool・MCPと組み合わせて開発・検証するリポジトリです。**
 
-GitHub Template Repositoryとして再利用できます。ライセンスは[MIT](LICENSE)です。
-CodexとClaude Codeは開発支援ツールで、アプリケーションの実行に必須ではありません。
+[koura718/agent-lab](https://github.com/koura718/agent-lab)を基に、Piのローカルインストール、Cerebrasへの接続、既存の`compare_lists`を呼び出す拡張、Skill、検証手順を追加しています。基準OSはUbuntu 24.04です。
 
-## まず使うコマンド
+- **Pi経路**：ターミナルからCerebrasの`qwen-3.8-27b`と対話し、Pi拡張を通じてPython MCPを利用します。
+- **Python経路**：OpenAI Agents SDKでFunction Tool / MCPを実行し、OpenAI・Anthropic・Cerebrasの2〜3モデルを並列評価できます。
+- **API不要の経路**：ローカルCLI、MCP診断CLI、Python・Nodeテストで動作を確認できます。
 
-Gitとmiseが利用可能なUbuntu 24.04で実行します。
+> 2026-09-30時点でPiの追加は[PR #1](https://github.com/koura718/agent-lab-pi/pull/1)の`feature/pi-cerebras-harness`ブランチにあります。以下の初回導入例は、このブランチを明示して取得します。`main`へのマージ前は、`main`に`setup-pi.sh`はありません。
+
+## 実装済みの機能と現在の範囲
+
+| 項目 | 現在の実装 |
+|---|---|
+| Pi | `@earendil-works/pi-coding-agent` **0.99.1**をpnpmワークスペース内に固定 |
+| Cerebras接続 | 起動スクリプトでprovider=`cerebras`、model=`qwen-3.8-27b`、thinking=`off`を指定 |
+| Pi拡張Tool | `compare_lists`を登録し、PythonのMCP診断CLIへ委譲 |
+| Skill | `independent-checks`。独立した確認の並列化と、変動する情報の再確認を指示 |
+| Python Tool | 同じ比較処理をFunction Tool / MCP Serverから利用 |
+| Pythonモデル比較 | 選択した2〜3providerの同時実行、Tool結果検証、JSONレポート |
+| 設定・ログ | Python側のCLI・環境変数・TOML設定、run_id・処理時間・エラー分類 |
+| Tracing | Python側で明示的に有効化。PiのMCP診断経路では無効 |
+| CI | Ubuntu 24.04でPython検証、Pi依存導入、Nodeテスト、JUnit保存 |
+
+**トレーディングカード調査は設計段階です。** 楽天・Yahoo!・PSA等の接続、カード識別、価格取得、SQLite履歴、ブラウザ操作、Web確認の並列実行は未実装です。Skillは手順を示すもので、外部サービスへの接続や並列実行機構を追加するものではありません。
+
+## 環境と依存管理
+
+| 項目 | 固定値・用途 |
+|---|---|
+| OS | Ubuntu 24.04。Windowsネイティブ実行は未検証 |
+| Node.js | 24.21.0。Pi・起動スクリプト・Nodeテスト |
+| pnpm | 12.3.4。Node依存管理 |
+| Python | 3.14.7。比較処理・MCP・Agents SDK・Pythonテスト |
+| uv | 0.12.12。Python依存管理 |
+| Pi | 0.99.1。対話型Agent |
+| mise / Git | 事前導入が必要 |
+
+ランタイムは[mise.toml](mise.toml)、Python依存は[uv.lock](uv.lock)、Node依存は[pnpm-lock.yaml](pnpm-lock.yaml)で管理します。Piの固定バージョンは[apps/pi-assistant/package.json](apps/pi-assistant/package.json)にあります。
+
+ローカルGPUやDockerは不要です。モデル推論はCerebras APIで実行します。Codex・Claude Codeは開発支援に利用できますが、このアプリの起動に必須ではありません。セットアップスクリプトはGit・miseのOS導入やsudo操作を行いません。
+
+## 初回セットアップ
+
+### 1. リポジトリとPython基盤を準備
+
+GitHubへのSSH接続とmiseが利用可能な状態で実行します。
 
 ```bash
-git clone git@github.com:koura718/agent-lab-pi.git
+git clone --branch feature/pi-cerebras-harness git@github.com:koura718/agent-lab-pi.git
 cd agent-lab-pi
-```
 
-[mise.toml](mise.toml)の内容を確認し、信頼を許可してセットアップします。
-
-```bash
 mise trust mise.toml
 ./scripts/bootstrap.sh --setup --check &&
 ./scripts/bootstrap.sh --setup
 ```
 
-`--check`は前提条件だけを確認します。通常の`--setup`はツール導入、固定依存の同期、
-未作成の`.env`の作成、lint・テスト等の検証まで実行します。
-既存の`.env`は上書きせず、内容も読み込みません。APIキーは不要ですが、依存のダウンロードには通信が必要です。
+`mise trust`の前に`mise.toml`を確認してください。`--check`は前提条件の確認のみです。通常の`--setup`はツール導入、Python固定依存の同期、未作成の`.env`の作成、Python検証を行います。既存の`.env`は保持します。
 
-**環境構築には必ず`--setup`を付けてください。** 引数なしの`bootstrap.sh`は、
-ディレクトリ名に基づくプロジェクト名・Pythonパッケージ名変更の別機能です。
-従来の`./scripts/setup.sh`も同じ環境構築を実行します。
+**`bootstrap.sh`には必ず`--setup`を付けてください。** 引数なしはテンプレート名・Pythonパッケージ名を変更する別機能です。この派生版でもPythonパッケージは`agent_lab`、CLIは`agent-lab`のままです。
 
-APIなしで比較します。
-
-```bash
-mise exec -- uv run --frozen agent-lab --tool-mode function --no-tracing \
-  --compare-json '{"source":["A","B","B"],"baseline":["B","C"]}'
-```
-
-```json
-{"same": ["B"], "source_only": ["A"], "baseline_only": ["C"]}
-```
-
-日常の変更後の検証は次のコマンドです。
-
-```bash
-./scripts/validate.sh
-```
-
-### Pi + Cerebras を追加する
-
-上記のPython環境のセットアップが完了した後、Piをリポジトリ内に固定バージョンで導入します。
+### 2. Piを追加
 
 ```bash
 ./scripts/setup-pi.sh
 ```
 
-`.env`の`CEREBRAS_API_KEY=`にCerebras Cloudのキーを設定して起動します。
+このスクリプトは次の処理を実行します。APIキーは不要ですが、初回の依存取得には通信が必要です。
+
+1. `uv sync --frozen`でPython依存を同期。
+2. `pnpm install --frozen-lockfile --ignore-scripts`でPi依存を同期。
+3. `pnpm test:pi`でNodeテストを実行。
+
+Piをグローバルにはインストールしません。詳細は[bootstrap手順](docs/bootstrap.md)と[Pi + Cerebras手順](docs/pi-cerebras.md)を参照してください。
+
+### 3. Cerebrasキーを設定
+
+[Cerebras Cloud](https://cloud.cerebras.ai/)で発行したキーを、既存の`.env`の`CEREBRAS_API_KEY=`へ設定します。値をGitやチャットへ貼り付けないでください。
+
+```bash
+chmod 600 .env
+```
+
+Pi起動にはCerebrasキーを使います。OpenAI・Anthropicのキーは、対応するPython版Agentを利用する場合に設定します。
+
+## Piの起動と動作確認
 
 ```bash
 mise exec -- pnpm pi
 ```
 
-起動、MCP接続、確認方法と記事との対応は[Pi + Cerebras手順](docs/pi-cerebras.md)を参照してください。
+起動時に`AGENTS.md`、`independent-checks`、`extension.mjs`が読み込まれ、モデル欄に`qwen-3.8-27b`と`thinking off`が表示されます。
 
-詳しい導入・再実行・障害対応は[bootstrap手順](docs/bootstrap.md)を参照してください。
+**入力欄は、画面下部の横線に囲まれた空白部分です。** 次の文章を入力し、Enterで送信してください。この操作はCerebrasの実APIを利用します。
 
-## 実装済みの機能
-
-| Step | 項目 | 現在の実装 |
-|---|---|---|
-| 1 | Setup | miseのツール導入、固定依存の同期、.env作成、検証 |
-| 2 | Validation | Ruff、pytest、compile、Git差分・秘密情報の基本確認 |
-| 3 | Function Tool | compare_lists、厳密な入力検証、Agentへの登録 |
-| 4 | MCP Server | 比較本体を共有し、stdioでTool一覧・呼出しを公開 |
-| 5 | MCP Client | 診断CLI、Agent接続、timeout、子プロセス終了処理 |
-| 6 | Integration Tests | 両経路の一致、異常系、キャンセル、実LLMの明示ゲート |
-| 7 | CI | Ubuntu検証、JUnit保存14日、失敗時の調査手順 |
-| 8 | Tracing | 明示有効化、メタデータのみ送信、ログのrun_idとの対応 |
-| 9 | Application Logging | 共通stderrログ、実行ID、処理時間、エラー分類 |
-| 10 | Bootstrap | --setup入口、前提確認、再実行、既存.env保持、CI経由の検証 |
-
-2モデル並列対応（PR #13）のUbuntu検証結果は **189 passed, 2 skipped** です。
-2件のskipは明示実行しなかったliveテストです。別途、`gpt-5-mini`でFunction / MCPのlive 2件成功と、
-MCP経路のTraceのDashboard表示を確認しています。`claude-sonnet-4-6`もFunction / MCPのlive 2件成功を確認済みです。実LLMの結果はモデル・接続環境に依存します。
-
-## 環境と前提
-
-| 項目 | 基準・役割 |
-|---|---|
-| OS | Ubuntu 24.04。Windowsネイティブのスクリプト実行は未検証 |
-| Python | 3.14.7。アプリ本体・テストを実行 |
-| uv | 0.12.12。Python依存管理 |
-| Node.js / pnpm | 24.21.0 / 12.3.4。開発環境の共通ツール |
-| mise | 基準環境で2026.9.5。事前導入が必要 |
-| Git | clone・差分検証に必要 |
-| GitHub CLI | PR・CI等をCLIから操作する場合のみ必要 |
-| OpenAI APIキー | 実LLMを呼ぶ場合のみ必要 |
-
-ツールの固定値は[mise.toml](mise.toml)、Python依存の解決結果は[uv.lock](uv.lock)を正とします。
-アプリ本体はPythonで動作し、NodeサービスやDockerコンテナは起動しません。
-bootstrapはGit・miseのOS導入、sudo操作、シェル設定変更、開発支援CLIのインストールを行いません。
-
-手動で同期する場合もlockを使用します。lockが欠落した場合はGitから復元してください。
-
-```bash
-mise install
-mise exec -- uv sync --frozen
-./scripts/validate.sh
+```text
+compare_lists ツールを使って source=["A","B","B"] と baseline=["B","C"] を比較してください。
 ```
 
-## 比較処理とToolの使い方
+期待するTool結果は次のとおりです。モデルが返す説明文は実行ごとに変わることがあります。
 
-`compare_lists`は`source`と`baseline`を集合として比較します。
-入力を変更せず、ファイル操作・DB更新・外部通信も行いません。
+```json
+{"same":["B"],"source_only":["A"],"baseline_only":["C"]}
+```
 
-| 契約 | 内容 |
+Piの使用モデルは`/model`、推論設定は`/thinking`で確認できます。終了する際は入力を空にしてCtrl+Dを押し、通常のシェルプロンプトに戻ったことを確認します。
+
+### PiからPython MCPまでの経路
+
+Pi自身がCerebrasとの対話を管理します。PythonのAgents SDKをPiの内部で動かす構成ではありません。
+
+| 順序 | 処理 |
 |---|---|
-| 入力 | source / baselineの2配列が必須。空配列可、各1,000要素以下 |
-| 要素 | 文字列のみ、各1〜256文字。自動型変換なし |
-| 比較 | 重複を除去。大小文字・空白・Unicode表記は保持して区別 |
-| 結果 | same / source_only / baseline_onlyをPython文字列の標準順序でソート |
-| 不正入力 | 成功結果へ変換せず拒否。ローカルCLIはerror JSONと終了コード2 |
+| 1 | PiがCerebrasへ問い合わせ、モデルが`compare_lists`を選択 |
+| 2 | `extension.mjs`がPi Toolとして呼び出される |
+| 3 | `mcp-bridge.mjs`が`uv run --frozen agent-lab-mcp-client --no-tracing call compare_lists ...`を実行 |
+| 4 | Python診断Clientがローカルのstdio MCP Serverを起動して呼び出す |
+| 5 | Serverが共通ドメイン関数で比較し、結果がPi・モデルへ戻る |
 
-[Tool契約](docs/tool-contract.md)に境界値とエラー形式を記載しています。
+現在は**Tool呼び出しごとに診断CLIとMCP Serverを起動する方式**です。Pi 0.99系のネイティブMCP接続やcodemodeを使う構成への移行は、この実装には含めていません。
 
-### MCP診断CLI（API不要）
+ブリッジはシェルを介さず子プロセスを実行し、20秒のプロセスタイムアウトと64 KiBの出力バッファ上限を設定します。受け取ったJSONのフィールドと型を検証し、不正な結果や子プロセス失敗をToolエラーにします。この上限はPython側のTool入力上限とは別です。
+
+### Piの設定・保存先
+
+| 項目 | 実装上の扱い |
+|---|---|
+| 起動入口 | `scripts/run-pi.mjs` |
+| 作業ディレクトリ | 呼び出し元にかかわらずリポジトリ直下 |
+| Cerebrasキー | 非空の環境変数`CEREBRAS_API_KEY`を優先し、なければルート`.env`の該当行を読む |
+| `.env`読み込み | シェルとして実行せず、Cerebrasキーの行だけを解析。Python版CLIとは扱いが異なる |
+| Piへの環境変数 | 継承環境から`OPENAI_API_KEY`・`ANTHROPIC_API_KEY`を除外 |
+| MCP診断CLIへの環境変数 | 上記2キーと`CEREBRAS_API_KEY`を除外し、Tracingを無効化 |
+| Piの設定・セッション | `PI_CODING_AGENT_DIR`を`.local/pi/`に固定。Git管理外 |
+| 追加引数 | `pnpm pi`に渡した引数をPi CLIへ転送 |
+
+これは資格情報をすべて隔離するサンドボックスではありません。Piの標準ファイル・シェルToolはローカルユーザー権限で動作します。外部調査専用の読み取り制限は今後の設計対象です。
+
+### Piの更新
+
+Piを終了してから、現在の追跡ブランチを更新します。
 
 ```bash
+git status --short --branch
+git pull --ff-only
+./scripts/setup-pi.sh
+mise exec -- pnpm --dir apps/pi-assistant exec pi --version
+mise exec -- pnpm pi
+```
+
+この版では`0.99.1`が表示されます。Pi画面に更新通知が出ても、リポジトリで管理する更新は`package.json`とロックファイルをセットで変更し、検証してから取り込みます。`.env`と`.local/pi/`は保持されます。
+
+## API不要の比較とMCP診断
+
+`compare_lists`は文字列配列を集合として比較し、重複を除いた`same`・`source_only`・`baseline_only`を返します。大小文字・空白・Unicode表記は区別し、各結果をPythonの文字列順でソートします。入力は各1,000要素以下、各文字列1〜256文字で、空配列は有効です。
+
+```bash
+# Python内のFunction Tool経路
+mise exec -- uv run --frozen agent-lab --tool-mode function --no-tracing \
+  --compare-json '{"source":["A","B","B"],"baseline":["B","C"]}'
+
+# MCP Tool一覧
 mise exec -- uv run --frozen agent-lab-mcp-client --no-tracing list-tools
 
+# 実MCP子プロセス経由の比較
 mise exec -- uv run --frozen agent-lab-mcp-client --no-tracing \
   call compare_lists --arguments '{"source":["A","B","B"],"baseline":["B","C"]}'
 ```
 
-ClientがローカルServerを起動し、初期化・要求・接続終了・子プロセス回収を行います。
-`list-tools`は名前・説明・入出力schema等を含む`{"tools": [...]}`、`call`は比較結果JSONを返します。
-共通オプションは`list-tools` / `call`より前に指定します。
+これらはモデルAPIを呼びません。診断ClientがServerを起動・終了します。Serverの単体入口は`agent-lab-mcp`ですが、stdioプロトコルの入力待ちになるため、手動確認には診断CLIを使ってください。
 
-Serverをstdioクライアントから直接起動するときの入口は次のとおりです。
-単体実行はプロトコル入力待ちになるため、手動確認には診断CLIを使用してください。
+詳細：[Tool契約](docs/tool-contract.md)、[MCP Server](docs/mcp-server.md)、[MCP Client](docs/mcp-client.md)。
 
-```bash
-mise exec -- uv run --frozen agent-lab-mcp
-```
+## Python版Agentと複数モデル比較
 
-Serverは`python -m agent_lab.mcp.server`、Clientは`python -m agent_lab.mcp.client`でも起動できます。
-HTTP公開、任意の外部Serverコマンド、リモートURL接続の設定は現在の対象外です。
-
-### 実LLMからToolを使う（任意・API課金あり）
-
-bootstrapで作成した`.env`に、自分の`OPENAI_API_KEY`を設定してください。
-`.env.example`にはキーの値を保存しません。`ANTHROPIC_API_KEY`欄はClaudeモデルで検証する場合に使用します。
-
-自分で管理する`.env`をサブシェルで読み込み、モデルを指定して実行します。
-`gpt-5-mini`はこのプロジェクトでの検証済み例です。利用可能なモデルに合わせて変更できます。
+Python版のCLIは`.env`を自動では読みません。自分で管理する`.env`をサブシェルで読み込んで実行します。以下は実APIを利用します。
 
 ```bash
 (
   set -a
   source .env
   set +a
-  export AGENT_PROVIDER=openai
-  export AGENT_MODEL=gpt-5-mini
-  mise exec -- uv run --frozen agent-lab --tool-mode function --no-tracing \
+  mise exec -- uv run --frozen agent-lab \
+    --provider cerebras --model qwen-3.8-27b --tool-mode mcp --no-tracing \
     --prompt 'compare_listsを使いsource=["A","B","B"]とbaseline=["B","C"]を比較してください。'
 )
 ```
 
-`--tool-mode mcp`に変更すると、Agentが別プロセスのServerから同じToolを使います。
-MCPモードではFunction Toolを二重登録しません。MCP Tool呼出しの自動再試行は無効です。
+`--tool-mode function`なら同一プロセスのToolを使用します。`agent-lab`の引数なし実行もモデルAPIを呼ぶため、API不要の確認には前節の明示コマンドを使ってください。
 
-`agent-lab`と`python -m agent_lab.main`は同じCLIです。
-**引数なし実行も実LLM APIを呼びます。** API不要の確認には`--compare-json`または診断CLIを使用してください。
-
-### Claudeで同じToolを検証する
-
-`--provider anthropic --model claude-sonnet-4-6 --no-tracing`でAnthropicの評価用互換APIを使えます。
-`ANTHROPIC_API_KEY`が必要で、OpenAIキーは不要です。Function / MCPの両経路に対応します。
-準備・liveテスト・互換範囲は[Claude検証手順](docs/claude.md)を参照してください。
-
-### GPT・Claude・Cerebrasを並列に比較する
-
-`agent-lab-compare-models`で同じ入力を選択した2〜3モデルへ同時に渡せます。
-選択したproviderのAPIキーを読み込んだシェルで実行してください（API課金あり）。
-
-```bash
-mise exec -- uv run --frozen agent-lab-compare-models \
-  --openai-model gpt-5-mini --anthropic-model claude-sonnet-4-6 \
-  --cerebras-model qwen-3.8-27b \
-  --tool-mode function \
-  --arguments '{"source":["A","B","B"],"baseline":["B","C"]}'
-```
-
-`--tool-mode mcp`なら各Agentが専用Serverを使います。実行ID・所要時間・最終応答・Tool結果を
-JSONで返し、片側のAPI失敗でも他方の結果を保持します。Tracingはすべて無効です。
-この専用CLIは`AGENT_PROVIDER`や`AGENT_MODEL`ではなく個別引数で設定します。
-[並列比較の設定・レポート・終了コード](docs/mixed-models.md)を参照してください。
-
-Cerebrasを使わない従来の2モデル実行も維持しています。任意の2 providerも選択できます。
-単独実行は`agent-lab --provider cerebras --model qwen-3.8-27b --no-tracing`です。
-`CEREBRAS_API_KEY`の設定、live検証、互換制約は[Cerebras手順](docs/cerebras.md)を参照してください。
-Cerebrasの実API検証は未実施です。Qwenのreasoningは本評価経路では無効化します。
-
-## 設定
-
-以下は単一providerのAgent / MCP診断CLIの設定です。
-
-優先順位は **CLI > 環境変数 > 明示したTOML > 既定値** です。
-`.env`と`config/agent.toml`は自動読込みしません。
-各層で値を検証するため、下位層の不正値を上位層で隠すことはできません。
-
-| CLI | 環境変数 | TOML | 既定値 |
-|---|---|---|---|
-| --provider | AGENT_PROVIDER | agent.provider | openai |
-| --tool-mode | AGENT_TOOL_MODE | agent.tool_mode | function |
-| --model | AGENT_MODEL | agent.model | SDK既定 |
-| --max-turns | AGENT_MAX_TURNS | agent.max_turns | 5 |
-| --run-timeout | AGENT_RUN_TIMEOUT_SECONDS | agent.run_timeout_seconds | 60秒 |
-| --connect-timeout | MCP_CONNECT_TIMEOUT_SECONDS | mcp.connect_timeout_seconds | 10秒 |
-| --call-timeout | MCP_CALL_TIMEOUT_SECONDS | mcp.call_timeout_seconds | 10秒 |
-| --log-level | AGENT_LOG_LEVEL | logging.level | INFO |
-| --tracing / --no-tracing | AGENT_TRACING_ENABLED | tracing.enabled | false |
-
-TOMLを使う例です。
-
-```bash
-mise exec -- uv run --frozen agent-lab-mcp-client \
-  --config config/agent.toml --no-tracing --call-timeout 15 list-tools
-```
-
-timeoutは有限の正数で最大3,600秒、最大ターン数は1〜100、ログレベルはINFO / WARNING / ERRORです。
-終了時の子プロセス回収やTrace送信待ちがあるため、設定秒数がCLI全体の厳密な終了期限になるわけではありません。
-詳細は[MCP Client手順](docs/mcp-client.md)を参照してください。
-
-## 構成
-
-| パス | 責務 |
-|---|---|
-| src/agent_lab/domain/list_comparison.py | SDK非依存の入力検証・比較処理 |
-| src/agent_lab/tools/list_tools.py | JSON境界・Function Toolアダプタ |
-| src/agent_lab/agent_factory.py | Function / MCPのAgent生成 |
-| src/agent_lab/main.py | ローカル比較・実LLM AgentのCLI |
-| src/agent_lab/mcp/ | stdio Server・診断Client・接続ライフサイクル |
-| src/agent_lab/model_comparison.py | GPT / Claude / Cerebrasの並列実行・Tool契約検証・結果レポート |
-| src/agent_lab/model_provider.py | provider選択・Anthropic / Cerebras互換APIクライアントの生成と終了 |
-| src/agent_lab/config.py | CLI・環境変数・TOMLの設定と検証 |
-| src/agent_lab/logging_config.py | 共通ログ・実行ID・処理時間・エラー分類 |
-| src/agent_lab/tracing_config.py | 明示的なTracing・送信項目の制限 |
-| config/agent.toml | 秘密情報を含まない設定例 |
-| tests/unit/・tests/test_smoke.py | 比較・設定・CLI・bootstrap等の検証 |
-| tests/integration/ | 実MCP子プロセス・経路一致・終了処理等の検証 |
-| tests/live/ | 実LLMの明示実行テスト |
-| tests/fixtures/ | 遅延・異常終了を再現するテスト専用Server |
-| scripts/ | bootstrap・setup・validate |
-| .github/workflows/validate.yml | Ubuntu CI・JUnit保存 |
-| docs/ | 設計・契約・操作・障害対応手順 |
-
-Function ToolとMCP Serverは同じドメイン関数を呼びます。
-診断ClientはLLMを経由せずMCPを確認でき、AgentはFunction / MCPのいずれか一方を利用します。
-MCPは現在のPython環境で`shell`を介さず起動し、APIキーを子プロセスへ転送しません。
-[アーキテクチャ](docs/architecture.md)と[Step 3〜6の設計記録](docs/next-steps-3-6.md)も参照できます。
-
-## テストとCI
-
-`validate.sh`はRuff lint・format、pytest、Python compile、Git whitespace、
-`.env`のGit除外、`.env.example`のAPIキー欄を確認します。
-テストまで到達すると`reports/pytest.xml`を生成します。通常はlive 2件をスキップします。
-
-```bash
-# 全体検証
-./scripts/validate.sh
-
-# 実MCPプロセスを含む統合テストだけ
-mise exec -- uv run --frozen pytest -m integration -v
-
-# lint / formatの個別確認
-mise exec -- uv run --frozen ruff check .
-mise exec -- uv run --frozen ruff format --check .
-```
-
-通常テストはScriptedModelやモックを使い、モデルAPI・実Tracing endpointを呼びません。
-ネットワーク禁止fixtureは親テストプロセスに適用され、OSの通信隔離を提供するものではありません。
-Tracingテストではメモリ内sinkやHTTPモックで送信内容を検証します。
-
-実LLMのFunction / MCP両経路を検証するときだけ、次を実行します。
+OpenAI・Anthropic・Cerebrasの同時比較例です。選択したすべてのproviderのキーが必要です。
 
 ```bash
 (
   set -a
   source .env
   set +a
-  export AGENT_PROVIDER=openai
-  export AGENT_MODEL=gpt-5-mini
-  mise exec -- uv run --frozen pytest -m live --run-live -v --maxfail=1
+  mise exec -- uv run --frozen agent-lab-compare-models \
+    --openai-model gpt-5-mini \
+    --anthropic-model claude-sonnet-4-6 \
+    --cerebras-model qwen-3.8-27b \
+    --tool-mode function \
+    --arguments '{"source":["A","B","B"],"baseline":["B","C"]}'
 )
 ```
 
-`--run-live`、選択providerのAPIキー、`AGENT_MODEL`が必要です。
-既定はOpenAIです。`AGENT_PROVIDER=anthropic`なら`ANTHROPIC_API_KEY`を使います。
-明示実行時のキー・モデル不足は設定エラー、API失敗はテスト失敗になります。
-liveテストもTracingは無効です。詳細は[テスト手順](docs/testing.md)を参照してください。
+モデル引数を2つだけ指定する比較も可能です。各AgentのTool結果、実行ID、所要時間、最終応答、失敗情報をJSONで返します。`--tool-mode mcp`なら各Agentが専用Serverを使います。全体の`status=success`と`results_match=true`を確認してください。
 
-GitHub Actionsはmain向けPRとmainへのpushで、Ubuntu 24.04上のbootstrapを実行します。
-JUnitは`pytest-results-RUN_ID-ATTEMPT`というArtifact名で14日保存し、結果をSummaryに出します。
-XML未生成の失敗ではArtifactはありません。
+これは同じ比較タスクを複数モデルで評価する機能であり、外部Webサイトを並列に調べる機能とは別です。モデルIDは利用アカウントでアクセス可能なものを指定します。
 
-2026-09-28確認時点で、`protect-main` rulesetは有効です。
-PR経由・`Validate repository`成功・最新baseへの追従を必須とし、force push・削除を禁止しています。
-必須承認人数は0、bypass設定はありません。テンプレートから作成した別リポジトリでは別途設定が必要です。
+詳細：[並列比較](docs/mixed-models.md)、[CerebrasのPython接続](docs/cerebras.md)、[Claude接続](docs/claude.md)。
 
-```bash
-gh run list --workflow validate.yml --limit 5
-```
+## Python設定・ログ・Tracing
 
-失敗ログ・Artifactの取得方法は[CI運用手順](docs/ci.md)を参照してください。
+単一Agent / MCP診断CLIの設定優先順位は**CLI > 環境変数 > 明示したTOML > 既定値**です。`config/agent.toml`も自動では読みません。
 
-## LoggingとTracing
+| 主なCLI引数 | 環境変数 | 既定値 |
+|---|---|---|
+| `--provider` | `AGENT_PROVIDER` | `openai` |
+| `--tool-mode` | `AGENT_TOOL_MODE` | `function` |
+| `--model` | `AGENT_MODEL` | SDK既定 |
+| `--max-turns` | `AGENT_MAX_TURNS` | 5 |
+| `--run-timeout` | `AGENT_RUN_TIMEOUT_SECONDS` | 60秒 |
+| `--connect-timeout` | `MCP_CONNECT_TIMEOUT_SECONDS` | 10秒 |
+| `--call-timeout` | `MCP_CALL_TIMEOUT_SECONDS` | 10秒 |
+| `--log-level` | `AGENT_LOG_LEVEL` | `INFO` |
+| `--tracing / --no-tracing` | `AGENT_TRACING_ENABLED` | 無効 |
 
-アプリのログはstderr、比較JSONやAgentの最終応答はstdoutです。
-MCP Serverのstdoutはプロトコル通信専用です。
+複数モデル比較CLIには別の引数・既定値があり、上表の`AGENT_MODEL`等を使いません。Piのprovider・model指定もこのPython設定とは独立です。
 
-```text
-[2026-09-28T00:00:00Z] [INFO] run_id=0123456789abcdef0123456789abcdef event=mcp_tool_completed duration_ms=0.266 error_kind=none completed
-```
+Pythonアプリのログはstderr、結果JSONはstdout、MCP Serverのstdoutはプロトコル専用です。UTC時刻・run_id・処理時間・エラー分類を記録し、入力配列・プロンプト・キーをアプリのイベントログへ出しません。
 
-UTC時刻、実行ID、イベント、処理時間、エラー分類を出力します。
-ClientとServerでrun_idを共有し、timeout・cancelled・invalid_input等を分類します。
-入力配列・プロンプト・APIキー・例外本文はアプリのイベントログに記録しません。
-ファイル保存・ローテーションは自動では行いません。詳しくは[Logging手順](docs/logging.md)を参照してください。
+TracingはPython側で明示的に有効化します。Piのブリッジは`--no-tracing`を指定するため、この経路からAgents SDKのTraceは送信しません。Pythonのログ・Traceの本文除外ルールは、Pi自身のセッション保存には適用されません。
 
-Tracingは既定で無効です。実LLMの実行例の`--no-tracing`を`--tracing`へ変更すると有効になります。
-TraceにはID・処理種別・開始終了時刻・一般化したエラー等のメタデータだけを送ります。
-プロンプト・モデル応答・Tool入出力はTraceへ送らず、custom spanで階層と時間を確認できます。
-この本文除外はTraceの設定であり、モデルAPIのResponsesログとは別です。
+詳細：[設定例](config/agent.toml)、[Logging](docs/logging.md)、[Tracing](docs/tracing.md)、[運用手順](docs/runbook.md)。
 
-ログの`trace_id=trace_<run_id>`を、[OpenAI Platform](https://platform.openai.com/traces)の
-Agents SDKのTrace画面で確認します。`trace_enabled`は有効化の記録で、送信到達の保証ではありません。
-`OPENAI_AGENTS_DISABLE_TRACING=true`または`1`がある場合、有効化は設定エラーになります。
-ローカル比較・診断CLIはTracingを受け付けません。[Tracing手順](docs/tracing.md)を参照してください。
+## テストとCI
 
-## 開発と再利用
-
-[AGENTS.md](AGENTS.md)・[CLAUDE.md](CLAUDE.md)を確認し、ブランチで変更してPRを作成します。
-Python依存はuv、Node関連はpnpm、ランタイムはmiseで管理します。
-変更後は`./scripts/validate.sh`と`git diff --check`で確認してください。
-実APIテストは日常検証とは別に、必要な場合だけ実行します。
-
-このリポジトリはGitHubのTemplate Repositoryとして有効化済みです（2026-09-28確認）。
-GitHub CLIで別リポジトリを作る例です。
+日常の確認はPythonとPiの両方を実行します。
 
 ```bash
-gh repo create my-agent --private --template koura718/agent-lab --clone
-cd my-agent
-mise trust mise.toml
-./scripts/bootstrap.sh --setup
+./scripts/validate.sh
+mise exec -- pnpm test:pi
+git diff --check
 ```
 
-テンプレートをコピーしてもPythonパッケージ名`agent_lab`やCLI名`agent-lab`はそのままです。
-既存の名前変更機能は`bootstrap.sh --project-name ... --package-name ...`ですが、
-Step 10で検証したのは環境構築の`--setup`です。名前変更後の再利用検証は未完了です。
-利用する場合は専用ブランチで`--dry-run`から確認し、import・CLI・lock・文書をレビューしてください。
+| 確認 | 内容 |
+|---|---|
+| `validate.sh` | Ruff lint・format、pytest、compile、Git whitespace、`.env`除外、キーの基本チェック |
+| `pnpm test:pi` | Tool登録、MCP診断CLIへの委譲・キー除外、不正レスポンス拒否の3件 |
+| MCP診断CLI | 実際のローカルClient / Server通信。モデルAPI不要 |
+| Pi対話による確認 | Cerebrasの実APIとTool往復を手動確認 |
+| Python liveテスト | `--run-live`で明示実行する実LLMテスト。通常はスキップ |
 
-今後の拡張候補は、新しいTool、アプリ側の構造化された最終応答、Agent間の役割分担・連携、外部API / DB連携です。
-現在のMCP構造化Tool結果と、将来のAgent最終応答の構造化は別の機能です。
+`validate.sh`単体にはNodeテストは含まれません。通常テストはモデルAPIを呼びませんが、依存が未導入の場合はダウンロード通信が発生します。Nodeの3件は実Cerebras接続を検証するテストではありません。
 
-## 秘密情報とバックアップ
+2026-09-30までの確認結果：
 
-`.env`、APIキー、OAuthトークン、SSH秘密鍵はGitへ保存しません。
-bootstrapは新規`.env`を権限600で作成し、既存ファイルは保持します。
-既存権限が600以外なら警告するため、必要に応じて自分で修正してください。
+- Python通常検証：**215 passed / 2 skipped**。skipは明示実行していないliveテスト。
+- Pi拡張テスト：**3 passed**。
+- Pi 0.99.1 + Cerebras `qwen-3.8-27b` + `compare_lists`：Ubuntu環境で利用者が実API・Tool往復の成功を確認。
+- Pi 0.99.1更新コミットの[GitHub Actions](https://github.com/koura718/agent-lab-pi/actions/runs/36681493456)：成功。
 
-```bash
-git check-ignore -v .env
-```
+Pi経路の成功は、Python Agents SDKのCerebras用liveテストや3モデル比較を実APIで検証したことを意味しません。これらの実行方法は[テスト手順](docs/testing.md)とprovider別文書を参照してください。
 
-Git履歴をbundleで保管する場合、作業ツリーの外へ保存できます。
+[CI](.github/workflows/validate.yml)は`main`向けPRと`main`へのpushで動作します。Ubuntu 24.04でPython bootstrapとPi依存導入・Nodeテストを実行し、Python JUnitを14日保存します。リポジトリのブランチ保護・テンプレート設定は、このworkflowとは別のGitHub設定です。
 
-```bash
-git bundle create ../agent-lab-backup.bundle --all
-git bundle verify ../agent-lab-backup.bundle
-```
+## ファイル構成
 
-bundleには未コミットの変更やGit管理外の`.env`は含まれません。
-秘密情報は別途管理してください。OS設定・sudo・削除等の操作は影響範囲を確認して実施します。
+| パス | 役割 |
+|---|---|
+| `apps/pi-assistant/package.json` | Pi・TypeBoxの固定依存 |
+| `apps/pi-assistant/extension.mjs` | Piの`compare_lists` Tool登録 |
+| `apps/pi-assistant/mcp-bridge.mjs` | Python診断CLIの実行、結果検証、エラー処理 |
+| `apps/pi-assistant/skills/independent-checks/SKILL.md` | 再利用する確認手順 |
+| `apps/pi-assistant/test/` | Pi拡張・ブリッジのNodeテスト |
+| `scripts/run-pi.mjs` | キー読み込み・Pi起動 |
+| `scripts/setup-pi.sh` | 固定依存の同期・Nodeテスト |
+| `package.json`・`pnpm-workspace.yaml`・`pnpm-lock.yaml` | Nodeワークスペース・コマンド・解決済み依存 |
+| `src/agent_lab/domain/list_comparison.py` | SDK非依存の比較本体・入力検証 |
+| `src/agent_lab/tools/`・`src/agent_lab/mcp/` | Function Tool・MCP Server / Client |
+| `src/agent_lab/main.py`・`agent_factory.py` | Python CLI・Agent生成 |
+| `src/agent_lab/model_comparison.py`・`model_provider.py` | provider接続・複数モデル評価 |
+| `tests/` | Pythonの単体・統合・liveテスト |
+| `scripts/setup.sh`・`bootstrap.sh`・`validate.sh` | Python基盤の導入・検証 |
+| `.local/pi/` | Piの設定・セッション。Git管理外 |
+| `reports/` | pytest XML等の出力。Git管理外 |
+| `docs/` | 契約、設計、各実行経路の詳細手順 |
+
+[AGENTS.md](AGENTS.md)・[CLAUDE.md](CLAUDE.md)を確認して開発してください。`docs/next-steps-3-6.md`等には元のPython基盤の実装履歴も含まれます。Piの入口はこのREADMEと[Pi手順](docs/pi-cerebras.md)を参照してください。
 
 ## 困ったとき
 
 | 症状 | 確認・対応 |
 |---|---|
-| miseがない / 信頼エラー | PATH・導入状況・mise.tomlの内容と信頼設定を確認 |
-| CLIや依存が古い | ブランチを確認し`mise exec -- uv sync --frozen` |
-| APIキー未設定 | 実LLMなら自分の.envを読み込む。ローカル比較なら--compare-json |
-| 通常テストで2 skipped | live未指定時の正常動作 |
-| --compare-jsonが拒否される | --tool-mode functionと--no-tracing、設定値の型を確認 |
-| MCP呼出し失敗 | run_id・error_kind、接続/呼出しtimeout、Server終了ログを確認 |
-| Traceがない | 対象プロジェクト・Trace ID・有効化設定・export警告を確認 |
-| CIでXMLがない | テスト以前のセットアップ・lint等の最初の失敗を確認 |
+| `setup-pi.sh: No such file or directory` | `git branch --show-current`を確認。マージ前は`git fetch origin`後、`git switch --track origin/feature/pi-cerebras-harness`。ローカルブランチが既にあれば`git switch feature/pi-cerebras-harness` |
+| `Pi is not installed` | `./scripts/setup-pi.sh`を実行 |
+| `CEREBRAS_API_KEY is missing` | ルート`.env`の該当行、または環境変数を確認 |
+| `.env`を書き換えても別のキーが使われる | 環境変数が優先される。値を表示せず、必要ならシェルで`unset CEREBRAS_API_KEY`して再起動 |
+| 入力欄が分からない | Pi画面下部の横線の間に入力。シェルプロンプトが見えている場合はPiを起動し直す |
+| `Local MCP comparison failed` | 前述のAPI不要MCP診断CLIを実行し、Python環境・エラー分類・タイムアウトを確認 |
+| 通常検証で`2 skipped` | liveテストを指定していない場合の正常動作 |
+| 古いPiが起動する | グローバルの`pi`ではなく`mise exec -- pnpm pi`を使用し、固定依存を同期 |
 
-環境診断には`mise doctor`と`mise current`を使用します。
-詳細な実行方法と終了コードは[運用手順](docs/runbook.md)、Server契約は[MCP Server手順](docs/mcp-server.md)にあります。
-`docs/next-steps-3-6.md`等のStep別文書には実装当時の計画・検証履歴も含まれます。
-現状の入口と完了状況はこのREADME、設定・動作の正確な定義は実装とテストを参照してください。
+`.env`と`.local/pi/`はGit管理外です。GitだけではAPIキーやPiの会話履歴はバックアップされません。秘密情報とセッションは必要に応じて別途保管してください。
 
 ## License
 
-本プロジェクトは[MIT License](LICENSE)の下で公開しています。
-
-Copyright (c) 2026 Masaaki Koura
-
-依存ライブラリには、それぞれのライセンスが適用されます。
+[MIT License](LICENSE)。Copyright (c) 2026 Masaaki Koura。依存ライブラリにはそれぞれのライセンスが適用されます。
