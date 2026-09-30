@@ -49,7 +49,7 @@
 GitHubへのSSH接続とmiseが利用可能な状態で実行します。
 
 ```bash
-git clone --branch feature/pi-cerebras-harness git@github.com:koura718/agent-lab-pi.git
+git clone git@github.com:koura718/agent-lab-pi.git
 cd agent-lab-pi
 
 mise trust mise.toml
